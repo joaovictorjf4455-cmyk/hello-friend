@@ -1,6 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { ArrowUpRight, Plus, Scissors, Trash2, TrendingUp, Wallet } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { MonthlyAnalysis } from "@/components/monthly-analysis";
+import { summarizeMonth } from "@/lib/barber-analysis";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -53,7 +56,7 @@ function Barbearia() {
   const [services, setServices] = usePersisted<Service[]>("barber-services-v2", defaultServices);
   const [visits, setVisits] = usePersisted<Visit[]>("barber-visits-v2", []);
   const [expenses, setExpenses] = usePersisted<Expense[]>("barber-expenses-v2", []);
-  const [tab, setTab] = useState<"servicos" | "catalogo" | "despesas">("servicos");
+  const [tab, setTab] = useState<"servicos" | "catalogo" | "despesas" | "analise">("servicos");
   const [month, setMonth] = useState(today().slice(0, 7));
 
   const [serviceId, setServiceId] = useState("s1");
@@ -102,6 +105,7 @@ function Barbearia() {
     { id: "servicos", label: "Atendimentos" },
     { id: "catalogo", label: "Tabela de preços" },
     { id: "despesas", label: "Despesas" },
+    { id: "analise", label: "Análise IA" },
   ] as const;
 
   return (
@@ -135,7 +139,7 @@ function Barbearia() {
 
         <nav className="mb-6 flex gap-2 overflow-x-auto">
           {tabs.map(t => (
-            <button key={t.id} onClick={() => setTab(t.id)} className={`whitespace-nowrap rounded-md px-4 py-2 text-sm font-semibold transition ${tab === t.id ? "bg-primary text-primary-foreground" : "bg-secondary text-secondary-foreground hover:bg-accent"}`}>{t.label}</button>
+            <Button key={t.id} onClick={() => setTab(t.id)} variant={tab === t.id ? "default" : "secondary"}>{t.label}</Button>
           ))}
         </nav>
 
@@ -245,6 +249,7 @@ function Barbearia() {
           </div>
         )}
 
+        {tab === "analise" && <MonthlyAnalysis key={JSON.stringify(summarizeMonth(month, visits, expenses))} data={summarizeMonth(month, visits, expenses)} />}
         <p className="mt-8 text-center text-xs text-muted-foreground">Os dados ficam salvos somente neste navegador.</p>
       </main>
     </div>
