@@ -1,99 +1,252 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { ArrowDownLeft, ArrowUpRight, BarChart3, CreditCard, LayoutDashboard, Plus, Target, Trash2, Wallet } from "lucide-react";
+import { ArrowUpRight, Plus, Scissors, Trash2, TrendingUp, Wallet } from "lucide-react";
 
-export const Route = createFileRoute("/")({ component: FinanAI });
-type Transaction = { id: string; title: string; amount: number; kind: "income" | "expense"; category: string; date: string };
-type Goal = { id: string; name: string; target: number; saved: number };
-const initialTransactions: Transaction[] = [
-  { id: "demo-1", title: "Salário", amount: 5200, kind: "income", category: "Trabalho", date: "2026-10-05" },
-  { id: "demo-2", title: "Aluguel", amount: 1250, kind: "expense", category: "Moradia", date: "2026-10-06" },
-  { id: "demo-3", title: "Supermercado", amount: 480, kind: "expense", category: "Alimentação", date: "2026-10-09" },
-  { id: "demo-4", title: "Transporte", amount: 180, kind: "expense", category: "Transporte", date: "2026-10-10" },
+export const Route = createFileRoute("/")({
+  head: () => ({
+    meta: [
+      { title: "FinanAI Barbeiro — Controle de cortes e serviços" },
+      { name: "description", content: "Registre cortes e serviços da sua barbearia e acompanhe o faturamento do mês." },
+      { property: "og:title", content: "FinanAI Barbeiro" },
+      { property: "og:description", content: "Registre cortes e serviços da barbearia e veja seu faturamento." },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary" },
+    ],
+    links: [
+      { rel: "preconnect", href: "https://fonts.googleapis.com" },
+      { rel: "stylesheet", href: "https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Barlow:wght@400;500;600;700&display=swap" },
+    ],
+  }),
+  component: Barbearia,
+});
+
+type Service = { id: string; name: string; price: number };
+type Visit = { id: string; serviceId: string; serviceName: string; price: number; client: string; payment: string; date: string };
+type Expense = { id: string; title: string; amount: number; date: string };
+
+const defaultServices: Service[] = [
+  { id: "s1", name: "Corte", price: 40 },
+  { id: "s2", name: "Barba", price: 30 },
+  { id: "s3", name: "Corte + Barba", price: 60 },
+  { id: "s4", name: "Pezinho", price: 15 },
+  { id: "s5", name: "Sobrancelha", price: 15 },
 ];
-const initialGoals: Goal[] = [{ id: "goal-demo", name: "Reserva de emergência", target: 10000, saved: 2400 }];
-const currency = (n: number) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(n);
-const categories = ["Alimentação", "Moradia", "Transporte", "Saúde", "Lazer", "Compras", "Trabalho", "Outros"];
+const payments = ["Pix", "Dinheiro", "Cartão"];
+const brl = (n: number) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(n);
 const today = () => new Date().toISOString().slice(0, 10);
-function readSaved<T,>(key: string, fallback: T): T {
-  if (typeof window === "undefined") return fallback;
-  try { const raw = window.localStorage.getItem(key); return raw ? JSON.parse(raw) as T : fallback; } catch { return fallback; }
+const fmtDate = (d: string) => d.split("-").reverse().join("/");
+
+function usePersisted<T>(key: string, fallback: T) {
+  const [value, setValue] = useState<T>(fallback);
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    try { const raw = localStorage.getItem(key); if (raw) setValue(JSON.parse(raw)); } catch { /* ignore */ }
+    setReady(true);
+  }, [key]);
+  useEffect(() => { if (ready) localStorage.setItem(key, JSON.stringify(value)); }, [key, value, ready]);
+  return [value, setValue] as const;
 }
-function FinanAI() {
-  const [transactions, setTransactions] = useState<Transaction[]>(() => readSaved("finanai-transactions-v1", initialTransactions));
-  const [goals, setGoals] = useState<Goal[]>(() => readSaved("finanai-goals-v1", initialGoals));
-  const [tab, setTab] = useState<"overview" | "transactions" | "reports" | "goals">("overview");
-  const [modal, setModal] = useState(false);
-  const [kind, setKind] = useState<"income" | "expense">("expense");
-  const [title, setTitle] = useState("");
-  const [amount, setAmount] = useState("");
-  const [category, setCategory] = useState("Alimentação");
-  const [date, setDate] = useState(today);
-  const [goalName, setGoalName] = useState("");
-  const [goalTarget, setGoalTarget] = useState("");
-  const [goalDeposit, setGoalDeposit] = useState<Record<string, string>>({});
+
+const input = "mt-1 w-full rounded-md border border-input bg-background p-3 text-foreground";
+
+function Barbearia() {
+  const [services, setServices] = usePersisted<Service[]>("barber-services-v2", defaultServices);
+  const [visits, setVisits] = usePersisted<Visit[]>("barber-visits-v2", []);
+  const [expenses, setExpenses] = usePersisted<Expense[]>("barber-expenses-v2", []);
+  const [tab, setTab] = useState<"servicos" | "catalogo" | "despesas">("servicos");
   const [month, setMonth] = useState(today().slice(0, 7));
-  useEffect(() => { window.localStorage.setItem("finanai-transactions-v1", JSON.stringify(transactions)); }, [transactions]);
-  useEffect(() => { window.localStorage.setItem("finanai-goals-v1", JSON.stringify(goals)); }, [goals]);
-  const monthly = useMemo(() => transactions.filter(t => t.date.startsWith(month)), [transactions, month]);
-  const income = monthly.filter(t => t.kind === "income").reduce((sum, t) => sum + t.amount, 0);
-  const expenses = monthly.filter(t => t.kind === "expense").reduce((sum, t) => sum + t.amount, 0);
-  const breakdown = categories.map(name => ({ name, value: monthly.filter(t => t.kind === "expense" && t.category === name).reduce((s, t) => s + t.amount, 0) })).filter(c => c.value > 0).sort((a,b) => b.value - a.value);
-  const ordered = [...monthly].sort((a,b) => b.date.localeCompare(a.date));
-  const addTransaction = (e: React.FormEvent) => {
+
+  const [serviceId, setServiceId] = useState("s1");
+  const [client, setClient] = useState("");
+  const [payment, setPayment] = useState("Pix");
+  const [date, setDate] = useState(today);
+  const [customPrice, setCustomPrice] = useState("");
+
+  const [newName, setNewName] = useState("");
+  const [newPrice, setNewPrice] = useState("");
+  const [expTitle, setExpTitle] = useState("");
+  const [expAmount, setExpAmount] = useState("");
+
+  const mVisits = useMemo(() => visits.filter(v => v.date.startsWith(month)).sort((a, b) => b.date.localeCompare(a.date)), [visits, month]);
+  const mExpenses = useMemo(() => expenses.filter(e => e.date.startsWith(month)), [expenses, month]);
+  const revenue = mVisits.reduce((s, v) => s + v.price, 0);
+  const spent = mExpenses.reduce((s, e) => s + e.amount, 0);
+  const ranking = services.map(s => ({ ...s, count: mVisits.filter(v => v.serviceId === s.id).length, total: mVisits.filter(v => v.serviceId === s.id).reduce((a, v) => a + v.price, 0) })).filter(s => s.count).sort((a, b) => b.total - a.total);
+
+  const selected = services.find(s => s.id === serviceId);
+
+  const addVisit = (e: React.FormEvent) => {
     e.preventDefault();
-    const value = Number(amount);
-    if (!title.trim() || !Number.isFinite(value) || value <= 0 || !date) return;
-    setTransactions(prev => [{ id: crypto.randomUUID(), title: title.trim(), amount: value, kind, category: kind === "income" ? "Trabalho" : category, date }, ...prev]);
-    setTitle(""); setAmount(""); setModal(false);
+    if (!selected) return;
+    const price = customPrice ? Number(customPrice) : selected.price;
+    if (!Number.isFinite(price) || price < 0) return;
+    setVisits(p => [{ id: crypto.randomUUID(), serviceId: selected.id, serviceName: selected.name, price, client: client.trim(), payment, date }, ...p]);
+    setClient(""); setCustomPrice("");
   };
-  const addGoal = (e: React.FormEvent) => {
-    e.preventDefault(); const value = Number(goalTarget);
-    if (!goalName.trim() || !Number.isFinite(value) || value <= 0) return;
-    setGoals(prev => [...prev, { id: crypto.randomUUID(), name: goalName.trim(), target: value, saved: 0 }]); setGoalName(""); setGoalTarget("");
+  const addService = (e: React.FormEvent) => {
+    e.preventDefault();
+    const price = Number(newPrice);
+    if (!newName.trim() || !Number.isFinite(price) || price <= 0) return;
+    setServices(p => [...p, { id: crypto.randomUUID(), name: newName.trim(), price }]);
+    setNewName(""); setNewPrice("");
   };
-  const deposit = (id: string) => {
-    const value = Number(goalDeposit[id]);
-    if (!Number.isFinite(value) || value <= 0) return;
-    setGoals(prev => prev.map(g => g.id === id ? { ...g, saved: Math.min(g.target, g.saved + value) } : g));
-    setGoalDeposit(prev => ({ ...prev, [id]: "" }));
+  const addExpense = (e: React.FormEvent) => {
+    e.preventDefault();
+    const amount = Number(expAmount);
+    if (!expTitle.trim() || !Number.isFinite(amount) || amount <= 0) return;
+    setExpenses(p => [{ id: crypto.randomUUID(), title: expTitle.trim(), amount, date: today() }, ...p]);
+    setExpTitle(""); setExpAmount("");
   };
-  const navigation = [
-    { id: "overview", label: "Visão geral", icon: LayoutDashboard },
-    { id: "transactions", label: "Transações", icon: CreditCard },
-    { id: "reports", label: "Relatórios", icon: BarChart3 },
-    { id: "goals", label: "Metas", icon: Target },
+
+  const tabs = [
+    { id: "servicos", label: "Atendimentos" },
+    { id: "catalogo", label: "Tabela de preços" },
+    { id: "despesas", label: "Despesas" },
   ] as const;
-  return <div className="min-h-screen bg-[#f5f7fb] text-slate-900">
-    <div className="mx-auto flex min-h-screen max-w-[1500px] flex-col md:flex-row">
-      <aside className="bg-[#101c31] px-5 py-6 text-white md:min-h-screen md:w-64 md:shrink-0">
-        <div className="mb-7 flex items-center gap-3"><div className="rounded-xl bg-emerald-400 p-2 text-slate-900"><Wallet size={23}/></div><div><div className="text-xl font-bold">Finan<span className="text-emerald-400">AI</span></div><div className="text-xs text-slate-400">Seu dinheiro sob controle</div></div></div>
-        <nav className="grid grid-cols-2 gap-2 sm:grid-cols-4 md:grid-cols-1">{navigation.map(item => <button key={item.id} onClick={() => setTab(item.id)} className={`flex items-center gap-2 rounded-xl px-3 py-3 text-left text-sm transition ${tab === item.id ? "bg-emerald-400 font-semibold text-slate-950" : "text-slate-300 hover:bg-white/10"}`}><item.icon size={18}/>{item.label}</button>)}</nav>
-        <p className="mt-8 hidden text-xs leading-relaxed text-slate-400 md:block">Versão demonstrativa. Seus registros ficam somente neste navegador, sem sincronização ou backup.</p>
-      </aside>
-      <main className="w-full min-w-0 flex-1 px-4 py-7 sm:px-8">
-        <header className="mb-8 flex flex-wrap items-center justify-between gap-4"><div><p className="text-sm font-medium text-emerald-700">Painel financeiro pessoal</p><h1 className="mt-1 text-2xl font-bold sm:text-3xl">{navigation.find(n => n.id === tab)?.label}</h1></div><div className="flex flex-wrap items-center gap-2"><input aria-label="Mês de referência" type="month" value={month} onChange={e => setMonth(e.target.value)} className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm"/><button onClick={() => setModal(true)} className="flex items-center gap-2 rounded-xl bg-emerald-500 px-4 py-2.5 text-sm font-bold text-slate-950 hover:bg-emerald-400"><Plus size={18}/> Nova transação</button></div></header>
-        {(tab === "overview" || tab === "reports") && <div className="mb-6 grid gap-4 sm:grid-cols-3">
-          {[{ label: "Saldo do mês", value: income - expenses, icon: Wallet, color: "text-slate-900" }, { label: "Receitas", value: income, icon: ArrowDownLeft, color: "text-emerald-600" }, { label: "Despesas", value: expenses, icon: ArrowUpRight, color: "text-rose-600" }].map(card => <div key={card.label} className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm"><div className="mb-4 flex items-center justify-between text-sm text-slate-500">{card.label}<card.icon size={20}/></div><div className={`text-2xl font-bold ${card.color}`}>{currency(card.value)}</div></div>)}
-        </div>}
-        {tab === "overview" && <div className="grid gap-5 lg:grid-cols-[1.3fr_1fr]">
-          <section className="rounded-2xl bg-white p-5 shadow-sm"><div className="mb-5 flex items-center justify-between"><h2 className="font-bold">Últimas transações</h2><button onClick={() => setTab("transactions")} className="text-sm font-semibold text-emerald-700">Ver todas</button></div><TransactionList items={ordered.slice(0, 6)} onDelete={id => setTransactions(prev => prev.filter(t => t.id !== id))}/></section>
-          <section className="rounded-2xl bg-white p-5 shadow-sm"><h2 className="mb-5 font-bold">Onde você gastou</h2><Breakdown items={breakdown} total={expenses}/><div className="mt-8 rounded-xl bg-emerald-50 p-4 text-sm text-emerald-900">💡 Dica: acompanhe suas maiores categorias de gastos para identificar oportunidades de economia.</div></section>
-        </div>}
-        {tab === "transactions" && <section className="rounded-2xl bg-white p-5 shadow-sm"><h2 className="mb-5 font-bold">Movimentações de {month.split("-").reverse().join("/")}</h2><TransactionList items={ordered} onDelete={id => setTransactions(prev => prev.filter(t => t.id !== id))}/></section>}
-        {tab === "reports" && <section className="rounded-2xl bg-white p-5 shadow-sm"><h2 className="mb-5 font-bold">Despesas por categoria</h2><Breakdown items={breakdown} total={expenses}/></section>}
-        {tab === "goals" && <div className="grid gap-5 lg:grid-cols-[1fr_1.2fr]"><form onSubmit={addGoal} className="h-fit space-y-4 rounded-2xl bg-white p-5 shadow-sm"><h2 className="font-bold">Criar nova meta</h2><label className="block text-sm">Nome da meta<input required value={goalName} onChange={e => setGoalName(e.target.value)} placeholder="Ex.: Minha viagem" className="mt-1 w-full rounded-xl border p-3"/></label><label className="block text-sm">Valor desejado (R$)<input required type="number" min="0.01" step="0.01" value={goalTarget} onChange={e => setGoalTarget(e.target.value)} className="mt-1 w-full rounded-xl border p-3"/></label><button className="rounded-xl bg-emerald-500 px-5 py-3 font-semibold text-slate-950">Criar meta</button></form><section className="space-y-4">{goals.map(g => <div key={g.id} className="rounded-2xl bg-white p-5 shadow-sm"><div className="mb-2 flex items-center justify-between gap-2"><h3 className="font-bold">{g.name}</h3><button aria-label={`Excluir meta ${g.name}`} onClick={() => setGoals(prev => prev.filter(item => item.id !== g.id))} className="text-slate-400 hover:text-rose-600"><Trash2 size={18}/></button></div><p className="mb-3 text-sm text-slate-500">{currency(g.saved)} de {currency(g.target)}</p><div className="mb-4 h-2 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-emerald-500" style={{ width: `${Math.min(100, g.saved / g.target * 100)}%` }}/></div><div className="flex gap-2"><input aria-label={`Adicionar à meta ${g.name}`} type="number" min="0.01" step="0.01" placeholder="Valor para guardar" value={goalDeposit[g.id] ?? ""} onChange={e => setGoalDeposit(prev => ({ ...prev, [g.id]: e.target.value }))} className="min-w-0 flex-1 rounded-xl border p-2 text-sm"/><button onClick={() => deposit(g.id)} className="rounded-xl bg-slate-900 px-4 text-sm font-semibold text-white">Adicionar</button></div></div>)}{goals.length === 0 && <p className="text-slate-500">Você ainda não criou metas.</p>}</section></div>}
-        <p className="mt-8 text-center text-xs text-slate-500">FinanAI MVP • Dados demonstrativos armazenados localmente • Não conecte contas bancárias nesta versão.</p>
+
+  return (
+    <div className="min-h-screen bg-background text-foreground" style={{ fontFamily: "Barlow, sans-serif" }}>
+      <header className="border-b border-border bg-card">
+        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-4 py-5">
+          <div className="flex items-center gap-3">
+            <div className="rounded-md bg-primary p-2 text-primary-foreground"><Scissors size={24} /></div>
+            <div>
+              <h1 className="text-3xl leading-none tracking-wide" style={{ fontFamily: "'Bebas Neue', sans-serif" }}>FinanAI <span className="text-primary">Barbeiro</span></h1>
+              <p className="text-xs text-muted-foreground">Cortes, serviços e caixa do mês</p>
+            </div>
+          </div>
+          <input aria-label="Mês" type="month" value={month} onChange={e => setMonth(e.target.value)} className="rounded-md border border-input bg-background px-3 py-2 text-sm" />
+        </div>
+      </header>
+
+      <main className="mx-auto max-w-6xl px-4 py-6">
+        <div className="mb-6 grid gap-4 sm:grid-cols-3">
+          {[
+            { label: "Faturamento", value: brl(revenue), icon: TrendingUp, cls: "text-primary" },
+            { label: "Atendimentos", value: String(mVisits.length), icon: Scissors, cls: "text-foreground" },
+            { label: "Lucro (fat. − despesas)", value: brl(revenue - spent), icon: Wallet, cls: revenue - spent >= 0 ? "text-primary" : "text-destructive" },
+          ].map(c => (
+            <div key={c.label} className="rounded-lg border border-border bg-card p-5">
+              <div className="mb-3 flex items-center justify-between text-sm text-muted-foreground">{c.label}<c.icon size={18} /></div>
+              <div className={`text-4xl tracking-wide ${c.cls}`} style={{ fontFamily: "'Bebas Neue', sans-serif" }}>{c.value}</div>
+            </div>
+          ))}
+        </div>
+
+        <nav className="mb-6 flex gap-2 overflow-x-auto">
+          {tabs.map(t => (
+            <button key={t.id} onClick={() => setTab(t.id)} className={`whitespace-nowrap rounded-md px-4 py-2 text-sm font-semibold transition ${tab === t.id ? "bg-primary text-primary-foreground" : "bg-secondary text-secondary-foreground hover:bg-accent"}`}>{t.label}</button>
+          ))}
+        </nav>
+
+        {tab === "servicos" && (
+          <div className="grid gap-5 lg:grid-cols-[1fr_1.4fr]">
+            <form onSubmit={addVisit} className="h-fit space-y-4 rounded-lg border border-border bg-card p-5">
+              <h2 className="text-2xl tracking-wide" style={{ fontFamily: "'Bebas Neue', sans-serif" }}>Registrar atendimento</h2>
+              <div className="grid grid-cols-2 gap-2">
+                {services.map(s => (
+                  <button type="button" key={s.id} onClick={() => setServiceId(s.id)} className={`rounded-md border p-3 text-left text-sm transition ${serviceId === s.id ? "border-primary bg-primary/15" : "border-border hover:bg-accent"}`}>
+                    <div className="font-semibold">{s.name}</div>
+                    <div className="text-muted-foreground">{brl(s.price)}</div>
+                  </button>
+                ))}
+              </div>
+              <label className="block text-sm">Cliente (opcional)<input maxLength={80} value={client} onChange={e => setClient(e.target.value)} placeholder="Ex.: Carlos" className={input} /></label>
+              <div className="grid grid-cols-2 gap-3">
+                <label className="block text-sm">Valor cobrado<input type="number" min="0" step="0.01" value={customPrice} onChange={e => setCustomPrice(e.target.value)} placeholder={selected ? String(selected.price) : ""} className={input} /></label>
+                <label className="block text-sm">Pagamento<select value={payment} onChange={e => setPayment(e.target.value)} className={input}>{payments.map(p => <option key={p}>{p}</option>)}</select></label>
+              </div>
+              <label className="block text-sm">Data<input required type="date" value={date} onChange={e => setDate(e.target.value)} className={input} /></label>
+              <button className="flex w-full items-center justify-center gap-2 rounded-md bg-primary p-3 font-bold text-primary-foreground hover:opacity-90"><Plus size={18} /> Registrar</button>
+            </form>
+
+            <div className="space-y-5">
+              <section className="rounded-lg border border-border bg-card p-5">
+                <h2 className="mb-4 text-2xl tracking-wide" style={{ fontFamily: "'Bebas Neue', sans-serif" }}>Atendimentos de {fmtDate(month)}</h2>
+                {mVisits.length === 0 ? <p className="py-6 text-center text-sm text-muted-foreground">Nenhum atendimento neste mês.</p> : (
+                  <div className="divide-y divide-border">
+                    {mVisits.map(v => (
+                      <div key={v.id} className="flex items-center gap-3 py-3">
+                        <div className="rounded-md bg-primary/15 p-2 text-primary"><Scissors size={16} /></div>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-semibold">{v.serviceName}{v.client && ` — ${v.client}`}</p>
+                          <p className="text-xs text-muted-foreground">{fmtDate(v.date)} • {v.payment}</p>
+                        </div>
+                        <strong className="text-sm text-primary">{brl(v.price)}</strong>
+                        <button aria-label="Excluir atendimento" onClick={() => setVisits(p => p.filter(x => x.id !== v.id))} className="p-1 text-muted-foreground hover:text-destructive"><Trash2 size={16} /></button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+              {ranking.length > 0 && (
+                <section className="rounded-lg border border-border bg-card p-5">
+                  <h2 className="mb-4 text-2xl tracking-wide" style={{ fontFamily: "'Bebas Neue', sans-serif" }}>Serviços mais vendidos</h2>
+                  <div className="space-y-4">
+                    {ranking.map(r => (
+                      <div key={r.id}>
+                        <div className="mb-1 flex justify-between text-sm"><span className="font-medium">{r.name} <span className="text-muted-foreground">({r.count}x)</span></span><span>{brl(r.total)}</span></div>
+                        <div className="h-2 overflow-hidden rounded-full bg-secondary"><div className="h-full rounded-full bg-primary" style={{ width: `${(r.total / revenue) * 100}%` }} /></div>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
+            </div>
+          </div>
+        )}
+
+        {tab === "catalogo" && (
+          <div className="grid gap-5 lg:grid-cols-[1fr_1.4fr]">
+            <form onSubmit={addService} className="h-fit space-y-4 rounded-lg border border-border bg-card p-5">
+              <h2 className="text-2xl tracking-wide" style={{ fontFamily: "'Bebas Neue', sans-serif" }}>Novo serviço</h2>
+              <label className="block text-sm">Nome<input required maxLength={50} value={newName} onChange={e => setNewName(e.target.value)} placeholder="Ex.: Platinado" className={input} /></label>
+              <label className="block text-sm">Preço (R$)<input required type="number" min="0.01" step="0.01" value={newPrice} onChange={e => setNewPrice(e.target.value)} className={input} /></label>
+              <button className="rounded-md bg-primary px-5 py-3 font-bold text-primary-foreground">Adicionar serviço</button>
+            </form>
+            <section className="rounded-lg border border-border bg-card p-5">
+              <h2 className="mb-4 text-2xl tracking-wide" style={{ fontFamily: "'Bebas Neue', sans-serif" }}>Tabela de preços</h2>
+              <div className="divide-y divide-border">
+                {services.map(s => (
+                  <div key={s.id} className="flex items-center gap-3 py-3">
+                    <span className="flex-1 font-semibold">{s.name}</span>
+                    <input aria-label={`Preço de ${s.name}`} type="number" min="0" step="0.01" value={s.price} onChange={e => setServices(p => p.map(x => x.id === s.id ? { ...x, price: Number(e.target.value) || 0 } : x))} className="w-28 rounded-md border border-input bg-background p-2 text-right text-sm" />
+                    <button aria-label={`Excluir ${s.name}`} onClick={() => setServices(p => p.filter(x => x.id !== s.id))} className="p-1 text-muted-foreground hover:text-destructive"><Trash2 size={16} /></button>
+                  </div>
+                ))}
+              </div>
+            </section>
+          </div>
+        )}
+
+        {tab === "despesas" && (
+          <div className="grid gap-5 lg:grid-cols-[1fr_1.4fr]">
+            <form onSubmit={addExpense} className="h-fit space-y-4 rounded-lg border border-border bg-card p-5">
+              <h2 className="text-2xl tracking-wide" style={{ fontFamily: "'Bebas Neue', sans-serif" }}>Nova despesa</h2>
+              <label className="block text-sm">Descrição<input required maxLength={80} value={expTitle} onChange={e => setExpTitle(e.target.value)} placeholder="Ex.: Lâminas, aluguel" className={input} /></label>
+              <label className="block text-sm">Valor (R$)<input required type="number" min="0.01" step="0.01" value={expAmount} onChange={e => setExpAmount(e.target.value)} className={input} /></label>
+              <button className="rounded-md bg-primary px-5 py-3 font-bold text-primary-foreground">Adicionar despesa</button>
+            </form>
+            <section className="rounded-lg border border-border bg-card p-5">
+              <h2 className="mb-4 text-2xl tracking-wide" style={{ fontFamily: "'Bebas Neue', sans-serif" }}>Despesas do mês — {brl(spent)}</h2>
+              {mExpenses.length === 0 ? <p className="py-6 text-center text-sm text-muted-foreground">Nenhuma despesa neste mês.</p> : (
+                <div className="divide-y divide-border">
+                  {mExpenses.map(x => (
+                    <div key={x.id} className="flex items-center gap-3 py-3">
+                      <div className="rounded-md bg-destructive/15 p-2 text-destructive"><ArrowUpRight size={16} /></div>
+                      <div className="flex-1"><p className="text-sm font-semibold">{x.title}</p><p className="text-xs text-muted-foreground">{fmtDate(x.date)}</p></div>
+                      <strong className="text-sm text-destructive">− {brl(x.amount)}</strong>
+                      <button aria-label="Excluir despesa" onClick={() => setExpenses(p => p.filter(e => e.id !== x.id))} className="p-1 text-muted-foreground hover:text-destructive"><Trash2 size={16} /></button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+          </div>
+        )}
+
+        <p className="mt-8 text-center text-xs text-muted-foreground">Os dados ficam salvos somente neste navegador.</p>
       </main>
     </div>
-    {modal && <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4" onClick={() => setModal(false)}><form onClick={e => e.stopPropagation()} onSubmit={addTransaction} className="w-full max-w-md space-y-4 rounded-2xl bg-white p-6 shadow-xl"><div className="flex items-center justify-between"><h2 className="text-xl font-bold">Nova transação</h2><button type="button" onClick={() => setModal(false)} aria-label="Fechar">✕</button></div><div className="grid grid-cols-2 gap-2"><button type="button" onClick={() => setKind("expense")} className={`rounded-xl p-3 text-sm font-semibold ${kind === "expense" ? "bg-rose-100 text-rose-700" : "bg-slate-100"}`}>Despesa</button><button type="button" onClick={() => setKind("income")} className={`rounded-xl p-3 text-sm font-semibold ${kind === "income" ? "bg-emerald-100 text-emerald-700" : "bg-slate-100"}`}>Receita</button></div><label className="block text-sm">Descrição<input required maxLength={100} value={title} onChange={e => setTitle(e.target.value)} placeholder="Ex.: Supermercado" className="mt-1 w-full rounded-xl border p-3"/></label><label className="block text-sm">Valor (R$)<input required type="number" min="0.01" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} className="mt-1 w-full rounded-xl border p-3"/></label>{kind === "expense" && <label className="block text-sm">Categoria<select value={category} onChange={e => setCategory(e.target.value)} className="mt-1 w-full rounded-xl border p-3">{categories.map(c => <option key={c}>{c}</option>)}</select></label>}<label className="block text-sm">Data<input required type="date" value={date} onChange={e => setDate(e.target.value)} className="mt-1 w-full rounded-xl border p-3"/></label><button className="w-full rounded-xl bg-emerald-500 p-3 font-bold text-slate-950">Salvar transação</button></form></div>}
-  </div>;
-}
-function TransactionList({ items, onDelete }: { items: Transaction[]; onDelete: (id: string) => void }) {
-  if (!items.length) return <p className="py-8 text-center text-sm text-slate-500">Nenhuma transação neste mês.</p>;
-  return <div className="divide-y divide-slate-100">{items.map(t => <div key={t.id} className="flex items-center gap-3 py-3"><div className={`rounded-xl p-2.5 ${t.kind === "income" ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-600"}`}>{t.kind === "income" ? <ArrowDownLeft size={19}/> : <ArrowUpRight size={19}/>}</div><div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold">{t.title}</p><p className="text-xs text-slate-500">{t.category} • {t.date.split("-").reverse().join("/")}</p></div><strong className={`whitespace-nowrap text-sm ${t.kind === "income" ? "text-emerald-700" : "text-rose-600"}`}>{t.kind === "income" ? "+" : "−"} {currency(t.amount)}</strong><button onClick={() => onDelete(t.id)} aria-label={`Excluir ${t.title}`} className="p-1 text-slate-400 hover:text-rose-600"><Trash2 size={16}/></button></div>)}</div>;
-}
-function Breakdown({ items, total }: { items: { name: string; value: number }[]; total: number }) {
-  if (!items.length) return <p className="py-8 text-sm text-slate-500">Cadastre despesas para visualizar seu relatório.</p>;
-  return <div className="space-y-5">{items.map(item => <div key={item.name}><div className="mb-2 flex justify-between gap-2 text-sm"><span className="font-medium">{item.name}</span><span className="text-slate-500">{currency(item.value)} ({Math.round(item.value / total * 100)}%)</span></div><div className="h-2.5 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-emerald-500" style={{ width: `${item.value / total * 100}%` }}/></div></div>)}</div>;
+  );
 }
