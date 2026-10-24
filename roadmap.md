@@ -1,0 +1,2 @@
+- [ ] Adicionar análise mensal OpenAI com dados agregados e sem nomes de clientes.
+- [ ] Verificar análise real, cancelamento e testes.
