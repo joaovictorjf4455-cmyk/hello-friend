@@ -12,7 +12,7 @@ export const analysisSchema = z.object({
 export type AnalysisData = z.infer<typeof analysisSchema>;
 
 export function summarizeMonth(month: string, visits: { date: string; serviceName: string; price: number }[], expenses: { date: string; amount: number }[]): AnalysisData {
-  const [year, number] = month.split("-").map(Number);
+  const [year = 2026, number = 1] = month.split("-").map(Number);
   const previousMonth = new Date(Date.UTC(year, number - 2, 1)).toISOString().slice(0, 7);
   const current = visits.filter(v => v.date.startsWith(month));
   const previous = visits.filter(v => v.date.startsWith(previousMonth));
