@@ -44,6 +44,12 @@ export function createResponsesCall(
   });
   return {
     result,
+    headers: () => {
+      const headers = new Headers();
+      const runId = runIdFetch.getRunId();
+      if (runId) headers.set("X-Lovable-AIG-Run-ID", runId);
+      return headers;
+    },
     response: () =>
       withLovableAiGatewayRunIdHeader(result.toUIMessageStreamResponse({ sendReasoning: true }), runIdFetch),
   };
