@@ -67,7 +67,7 @@ function FinanAI() {
     { id: "barber", label: "Minha Barbearia", icon: Scissors },
   ] as const;
   const exportBackup = () => {
-    const backup = { format: "finanai-backup", version: 1, exportedAt: new Date().toISOString(), transactions, goals, bookings: readSaved("finanai-barber-bookings-v1", []) };
+    const backup = { format: "finanai-backup", version: 1, exportedAt: new Date().toISOString(), transactions, goals, cashEntries: readSaved("finanai-barber-cash-v1", []) };
     const url = URL.createObjectURL(new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" }));
     const link = document.createElement("a"); link.href = url; link.download = "finanai-backup.json"; link.click(); URL.revokeObjectURL(url);
   };
@@ -77,13 +77,13 @@ function FinanAI() {
       const data: unknown = JSON.parse(await file.text());
       if (!data || typeof data !== "object") throw Error("Formato inválido");
       const b = data as Record<string, unknown>;
-      if (b.format !== "finanai-backup" || b.version !== 1 || !Array.isArray(b.transactions) || !Array.isArray(b.goals) || !Array.isArray(b.bookings)) throw Error("Backup incompatível");
+      if (b.format !== "finanai-backup" || b.version !== 1 || !Array.isArray(b.transactions) || !Array.isArray(b.goals) || !Array.isArray(b.cashEntries)) throw Error("Backup incompatível");
       const validTx = b.transactions.every((t: unknown) => !!t && typeof t === "object" && typeof (t as Transaction).id === "string" && typeof (t as Transaction).title === "string" && typeof (t as Transaction).amount === "number" && Number.isFinite((t as Transaction).amount) && ["income", "expense"].includes((t as Transaction).kind) && typeof (t as Transaction).date === "string" && typeof (t as Transaction).category === "string");
       const validGoals = b.goals.every((g: unknown) => !!g && typeof g === "object" && typeof (g as Goal).id === "string" && typeof (g as Goal).name === "string" && Number.isFinite((g as Goal).target) && Number.isFinite((g as Goal).saved));
-      const validBookings = b.bookings.every((x: unknown) => !!x && typeof x === "object" && typeof (x as { id: string }).id === "string" && typeof (x as { client: string }).client === "string" && typeof (x as { service: string }).service === "string" && Number.isFinite((x as { price: number }).price) && typeof (x as { when: string }).when === "string" && ["scheduled", "done", "cancelled"].includes((x as { status: string }).status));
-      if (!validTx || !validGoals || !validBookings) throw Error("Dados inválidos");
+      const validCash = b.cashEntries.every((x: unknown) => !!x && typeof x === "object" && typeof (x as { id: string }).id === "string" && typeof (x as { description: string }).description === "string" && Number.isFinite((x as { amount: number }).amount) && (x as { amount: number }).amount > 0 && typeof (x as { date: string }).date === "string" && ["in", "out"].includes((x as { type: string }).type));
+      if (!validTx || !validGoals || !validCash) throw Error("Dados inválidos");
       if (!window.confirm("Importar backup? Os dados atuais serão substituídos.")) return;
-      localStorage.setItem("finanai-barber-bookings-v1", JSON.stringify(b.bookings));
+      localStorage.setItem("finanai-barber-cash-v1", JSON.stringify(b.cashEntries));
       setTransactions(b.transactions as Transaction[]); setGoals(b.goals as Goal[]);
       window.alert("Backup importado. A página será recarregada."); window.location.reload();
     } catch { window.alert("Não foi possível importar o backup. Verifique o arquivo."); }
