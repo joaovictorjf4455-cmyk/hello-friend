@@ -1,6 +1,7 @@
+import { BarberDashboard } from "../components/barber-dashboard";
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { ArrowDownLeft, ArrowUpRight, BarChart3, CreditCard, LayoutDashboard, Plus, Target, Trash2, Wallet } from "lucide-react";
+import { ArrowDownLeft, ArrowUpRight, BarChart3, CreditCard, LayoutDashboard, Plus, Target, Trash2, Wallet, Scissors, Download, Upload } from "lucide-react";
 
 export const Route = createFileRoute("/")({ component: FinanAI });
 type Transaction = { id: string; title: string; amount: number; kind: "income" | "expense"; category: string; date: string };
@@ -22,7 +23,7 @@ function readSaved<T,>(key: string, fallback: T): T {
 function FinanAI() {
   const [transactions, setTransactions] = useState<Transaction[]>(() => readSaved("finanai-transactions-v1", initialTransactions));
   const [goals, setGoals] = useState<Goal[]>(() => readSaved("finanai-goals-v1", initialGoals));
-  const [tab, setTab] = useState<"overview" | "transactions" | "reports" | "goals">("overview");
+  const [tab, setTab] = useState<"overview" | "transactions" | "reports" | "goals" | "barber">("overview");
   const [modal, setModal] = useState(false);
   const [kind, setKind] = useState<"income" | "expense">("expense");
   const [title, setTitle] = useState("");
@@ -63,7 +64,30 @@ function FinanAI() {
     { id: "transactions", label: "Transações", icon: CreditCard },
     { id: "reports", label: "Relatórios", icon: BarChart3 },
     { id: "goals", label: "Metas", icon: Target },
+    { id: "barber", label: "Minha Barbearia", icon: Scissors },
   ] as const;
+  const exportBackup = () => {
+    const backup = { format: "finanai-backup", version: 1, exportedAt: new Date().toISOString(), transactions, goals, cashEntries: readSaved("finanai-barber-cash-v1", []) };
+    const url = URL.createObjectURL(new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" }));
+    const link = document.createElement("a"); link.href = url; link.download = "finanai-backup.json"; link.click(); URL.revokeObjectURL(url);
+  };
+  const importBackup = async (file?: File) => {
+    if (!file || file.size > 2_000_000) { window.alert("Selecione um arquivo JSON de até 2 MB."); return; }
+    try {
+      const data: unknown = JSON.parse(await file.text());
+      if (!data || typeof data !== "object") throw Error("Formato inválido");
+      const b = data as Record<string, unknown>;
+      if (b.format !== "finanai-backup" || b.version !== 1 || !Array.isArray(b.transactions) || !Array.isArray(b.goals) || !Array.isArray(b.cashEntries)) throw Error("Backup incompatível");
+      const validTx = b.transactions.every((t: unknown) => !!t && typeof t === "object" && typeof (t as Transaction).id === "string" && typeof (t as Transaction).title === "string" && typeof (t as Transaction).amount === "number" && Number.isFinite((t as Transaction).amount) && ["income", "expense"].includes((t as Transaction).kind) && typeof (t as Transaction).date === "string" && typeof (t as Transaction).category === "string");
+      const validGoals = b.goals.every((g: unknown) => !!g && typeof g === "object" && typeof (g as Goal).id === "string" && typeof (g as Goal).name === "string" && Number.isFinite((g as Goal).target) && Number.isFinite((g as Goal).saved));
+      const validCash = b.cashEntries.every((x: unknown) => !!x && typeof x === "object" && typeof (x as { id: string }).id === "string" && typeof (x as { description: string }).description === "string" && Number.isFinite((x as { amount: number }).amount) && (x as { amount: number }).amount > 0 && typeof (x as { date: string }).date === "string" && ["in", "out"].includes((x as { type: string }).type));
+      if (!validTx || !validGoals || !validCash) throw Error("Dados inválidos");
+      if (!window.confirm("Importar backup? Os dados atuais serão substituídos.")) return;
+      localStorage.setItem("finanai-barber-cash-v1", JSON.stringify(b.cashEntries));
+      setTransactions(b.transactions as Transaction[]); setGoals(b.goals as Goal[]);
+      window.alert("Backup importado. A página será recarregada."); window.location.reload();
+    } catch { window.alert("Não foi possível importar o backup. Verifique o arquivo."); }
+  };
   return <div className="min-h-screen bg-[#f5f7fb] text-slate-900">
     <div className="mx-auto flex min-h-screen max-w-[1500px] flex-col md:flex-row">
       <aside className="bg-[#101c31] px-5 py-6 text-white md:min-h-screen md:w-64 md:shrink-0">
@@ -82,7 +106,9 @@ function FinanAI() {
         </div>}
         {tab === "transactions" && <section className="rounded-2xl bg-white p-5 shadow-sm"><h2 className="mb-5 font-bold">Movimentações de {month.split("-").reverse().join("/")}</h2><TransactionList items={ordered} onDelete={id => setTransactions(prev => prev.filter(t => t.id !== id))}/></section>}
         {tab === "reports" && <section className="rounded-2xl bg-white p-5 shadow-sm"><h2 className="mb-5 font-bold">Despesas por categoria</h2><Breakdown items={breakdown} total={expenses}/></section>}
+        {tab === "barber" && <BarberDashboard month={month}/>}
         {tab === "goals" && <div className="grid gap-5 lg:grid-cols-[1fr_1.2fr]"><form onSubmit={addGoal} className="h-fit space-y-4 rounded-2xl bg-white p-5 shadow-sm"><h2 className="font-bold">Criar nova meta</h2><label className="block text-sm">Nome da meta<input required value={goalName} onChange={e => setGoalName(e.target.value)} placeholder="Ex.: Minha viagem" className="mt-1 w-full rounded-xl border p-3"/></label><label className="block text-sm">Valor desejado (R$)<input required type="number" min="0.01" step="0.01" value={goalTarget} onChange={e => setGoalTarget(e.target.value)} className="mt-1 w-full rounded-xl border p-3"/></label><button className="rounded-xl bg-emerald-500 px-5 py-3 font-semibold text-slate-950">Criar meta</button></form><section className="space-y-4">{goals.map(g => <div key={g.id} className="rounded-2xl bg-white p-5 shadow-sm"><div className="mb-2 flex items-center justify-between gap-2"><h3 className="font-bold">{g.name}</h3><button aria-label={`Excluir meta ${g.name}`} onClick={() => setGoals(prev => prev.filter(item => item.id !== g.id))} className="text-slate-400 hover:text-rose-600"><Trash2 size={18}/></button></div><p className="mb-3 text-sm text-slate-500">{currency(g.saved)} de {currency(g.target)}</p><div className="mb-4 h-2 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-emerald-500" style={{ width: `${Math.min(100, g.saved / g.target * 100)}%` }}/></div><div className="flex gap-2"><input aria-label={`Adicionar à meta ${g.name}`} type="number" min="0.01" step="0.01" placeholder="Valor para guardar" value={goalDeposit[g.id] ?? ""} onChange={e => setGoalDeposit(prev => ({ ...prev, [g.id]: e.target.value }))} className="min-w-0 flex-1 rounded-xl border p-2 text-sm"/><button onClick={() => deposit(g.id)} className="rounded-xl bg-slate-900 px-4 text-sm font-semibold text-white">Adicionar</button></div></div>)}{goals.length === 0 && <p className="text-slate-500">Você ainda não criou metas.</p>}</section></div>}
+        <section className="mt-7 flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white p-4"><div className="mr-auto"><p className="font-semibold">Backup gratuito</p><p className="text-xs text-slate-500">Salve um arquivo no seu dispositivo para proteger seus registros.</p></div><button onClick={exportBackup} className="flex items-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-sm text-white"><Download size={16}/> Exportar</button><label className="flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm"><Upload size={16}/> Importar<input type="file" accept=".json,application/json" className="hidden" onChange={e => { void importBackup(e.target.files?.[0]); e.target.value = ""; }}/></label></section>
         <p className="mt-8 text-center text-xs text-slate-500">FinanAI MVP • Dados demonstrativos armazenados localmente • Não conecte contas bancárias nesta versão.</p>
       </main>
     </div>
